@@ -1,0 +1,103 @@
+name: 🔨 Build LineageOS Kernel (KSU)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "lineage-23.2" ]
+
+jobs:
+  build:
+    name: Build Kernel 4.19.325
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lineage-23.2
+          fetch-depth: 1
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bc bison flex libssl-dev make python3 \
+            libncurses-dev kmod cpio lz4 zstd libelf-dev \
+            clang lld llvm
+          clang --version
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: lineage-k419
+          max-size: 5G
+
+      - name: Apply KernelSU
+        run: |
+          git clone https://github.com/tiann/KernelSU.git --depth 1
+          ln -sf ../KernelSU KernelSU
+
+      - name: Configure
+        run: |
+          # Generate base config from kona_defconfig
+          make ARCH=arm64 vendor/kona_defconfig
+
+          # Merge SM8250 common + cmi device configs
+          cat arch/arm64/configs/vendor/xiaomi/sm8250-common.config >> .config
+          cat arch/arm64/configs/vendor/xiaomi/cmi.config >> .config
+
+          # Resolve new symbols
+          make ARCH=arm64 olddefconfig
+
+          # Enable KSU
+          ./scripts/config --enable CONFIG_KPROBES
+          ./scripts/config --enable CONFIG_KSU
+          ./scripts/config --set-str CONFIG_LOCALVERSION -HermesKSU
+
+      - name: Build
+        run: |
+          set -o pipefail
+          make -j$(nproc) ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 2>&1 | tee build.log
+
+      - name: Package
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth 1
+
+          if [ -f arch/arm64/boot/Image ]; then
+            KERNEL_IMG=arch/arm64/boot/Image
+          elif [ -f arch/arm64/boot/Image.gz ]; then
+            gunzip arch/arm64/boot/Image.gz
+            KERNEL_IMG=arch/arm64/boot/Image
+          elif [ -f arch/arm64/boot/Image.gz-dtb ]; then
+            KERNEL_IMG=arch/arm64/boot/Image.gz-dtb
+          else
+            echo "ERROR: No kernel image found!"
+            find arch/arm64/boot/ -type f
+            exit 1
+          fi
+
+          cp $KERNEL_IMG AnyKernel3/
+
+          cat > AnyKernel3/anykernel.sh <<- 'EOS'
+            kernel.string=Hermes KSU Mi10Pro cmi
+            do.devicecheck=1
+            do.initd=0
+            do.modules=0
+            do.systemless=0
+            device.name1=cmi
+            device.name2=Mi10Pro
+            device.name3=Mi 10 Pro
+            block=/dev/block/bootdevice/by-name/boot
+            is_slot_device=auto
+            ramdisk_compression=auto
+            patch_vbmeta_flag=auto
+          EOS
+
+          cd AnyKernel3 && rm -rf .git README.md *placeholder
+          zip -r9 ../Hermes-KSU-cmi-4.19.325.zip . && cd ..
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hermes-KSU-cmi-LineageOS-4.19.325
+          path: |
+            Hermes-KSU-cmi-4.19.325.zip
+            build.log
+          retention-days: 7
