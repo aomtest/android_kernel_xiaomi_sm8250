@@ -34,19 +34,26 @@ jobs:
           git clone https://github.com/tiann/KernelSU.git --depth 1
           ln -sf ../KernelSU KernelSU
 
+      - name: Create missing min-tool-version.sh
+        run: |
+          cat > scripts/min-tool-version.sh << 'SCRIPT'
+          #!/bin/sh
+          case "$1" in
+            binutils) echo 2.27 ;;
+            gcc) echo 5.0 ;;
+            clang) echo 12.0 ;;
+            llvm) echo 12.0 ;;
+            *) echo 0 ;;
+          esac
+          SCRIPT
+          chmod +x scripts/min-tool-version.sh
+
       - name: Configure
         run: |
-          # Generate base config from kona_defconfig
           make ARCH=arm64 vendor/kona_defconfig
-
-          # Merge SM8250 common + cmi device configs
           cat arch/arm64/configs/vendor/xiaomi/sm8250-common.config >> .config
           cat arch/arm64/configs/vendor/xiaomi/cmi.config >> .config
-
-          # Resolve new symbols
           make ARCH=arm64 olddefconfig
-
-          # Enable KSU
           ./scripts/config --enable CONFIG_KPROBES
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --set-str CONFIG_LOCALVERSION -HermesKSU
