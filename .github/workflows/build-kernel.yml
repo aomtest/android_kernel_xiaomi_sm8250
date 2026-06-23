@@ -21,7 +21,6 @@ jobs:
           sudo apt-get install -y -qq bc bison flex libssl-dev make python3 \
             libncurses-dev kmod cpio lz4 zstd libelf-dev \
             clang lld llvm
-          clang --version
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -50,9 +49,13 @@ jobs:
 
       - name: Fix lockdep.c for Clang 18
         run: |
-          # Fix: 'nested' undeclared in lock_release()
           sed -i '/^void lock_release(/,/^}/ { /unsigned long flags;/a\\tint nested = 0;
           }' kernel/locking/lockdep.c
+
+      - name: Disable problematic modules
+        run: |
+          # Disable camera techpack (cam_cci_dev.h include issue)
+          sed -i 's/CONFIG_SPECTRA_CAMERA=y/# CONFIG_SPECTRA_CAMERA is not set/' arch/arm64/configs/vendor/xiaomi/cmi.config 2>/dev/null || true
 
       - name: Configure
         run: |
@@ -62,6 +65,7 @@ jobs:
           make ARCH=arm64 olddefconfig
           ./scripts/config --enable CONFIG_KPROBES
           ./scripts/config --enable CONFIG_KSU
+          ./scripts/config --disable CONFIG_SPECTRA_CAMERA
           ./scripts/config --set-str CONFIG_LOCALVERSION -HermesKSU
 
       - name: Build
