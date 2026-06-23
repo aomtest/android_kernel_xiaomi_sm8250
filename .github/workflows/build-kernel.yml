@@ -48,6 +48,12 @@ jobs:
           SCRIPT
           chmod +x scripts/min-tool-version.sh
 
+      - name: Fix lockdep.c for Clang 18
+        run: |
+          # Fix: 'nested' undeclared in lock_release()
+          sed -i '/^void lock_release(/,/^}/ { /unsigned long flags;/a\\tint nested = 0;
+          }' kernel/locking/lockdep.c
+
       - name: Configure
         run: |
           make ARCH=arm64 vendor/kona_defconfig
